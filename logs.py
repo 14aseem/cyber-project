@@ -32,7 +32,7 @@ with open(log_file, "r") as f:
 df = pd.DataFrame(records)
 df.to_csv("parsed_web_log.csv", index=False)
 
-print(f"✅ Parsed {len(df)} log entries.")
+print(f" Parsed {len(df)} log entries.")
 print("Data saved to parsed_web_log.csv")
 
 
@@ -73,7 +73,7 @@ plt.tight_layout()
 plt.savefig("requests_timeline.png")
 plt.close()
 
-print("📊 Charts saved (top_ips.png, top_urls.png, requests_timeline.png)")
+print(" Charts saved (top_ips.png, top_urls.png, requests_timeline.png)")
 
 pdf_file = "WebServer_Log_Report.pdf"
 c = canvas.Canvas(pdf_file, pagesize=letter)
