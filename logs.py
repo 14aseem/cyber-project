@@ -6,117 +6,159 @@ from datetime import datetime
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
-pattern = re.compile(
-    r'(?P<ip>\d+\.\d+\.\d+\.\d+)\s+-\s+(?P<user>[\w\-]+|-)\s+\[(?P<time>[^\]]+)\]\s+"(?P<method>[A-Z]+)\s(?P<url>\S+)\sHTTP/[0-9.]+"\s(?P<status>\d+)\s(?P<size>\d+)\s"(?P<referrer>[^"]*)"\s"(?P<agent>[^"]*)"'
-)
+LOG_FILE_PATH = "access.log"
+OUTPUT_CSV_FILE = "parsed_web_log.csv"
+OUTPUT_PDF_REPORT = "WebServer_Log_Report.pdf"
 
-records = []
-log_file = "access.log"
+def parse_log_file(file_path):
+    log_pattern = re.compile(
+        r'(?P<ip>\d+\.\d+\.\d+\.\d+)\s+-\s+(?P<user>[\w\-]+|-)\s+\[(?P<time>[^\]]+)\]\s+"(?P<method>[A-Z]+)\s(?P<url>\S+)\sHTTP/[0-9.]+"\s(?P<status>\d+)\s(?P<size>\d+)\s"(?P<referrer>[^"]*)"\s"(?P<agent>[^"]*)"'
+    )
 
-with open(log_file, "r") as f:
-    for line in f:
-        m = pattern.search(line)
-        if m:
-            records.append({
-                "IP": m.group('ip'),
-                "User": m.group('user'),
-                "Time": datetime.strptime(m.group('time').split()[0], "%d/%b/%Y:%H:%M:%S"),
-                "Method": m.group('method'),
-                "URL": m.group('url'),
-                "Status": int(m.group('status')),
-                "Bytes": int(m.group('size')),
-                "Referrer": m.group('referrer'),
-                "UserAgent": m.group('agent')
-            })
+    print(f"🕵️‍♂️ Reading and parsing the log file: {file_path}")
+    
+    parsed_records = []
+    with open(file_path, "r") as log_file:
+        for log_entry in log_file:
+            match = log_pattern.search(log_entry)
+            if match:
+                record = {
+                    "IP": match.group('ip'),
+                    "User": match.group('user'),
+                    "Time": datetime.strptime(match.group('time').split()[0], "%d/%b/%Y:%H:%M:%S"),
+                    "Method": match.group('method'),
+                    "URL": match.group('url'),
+                    "Status": int(match.group('status')),
+                    "Bytes": int(match.group('size')),
+                    "Referrer": match.group('referrer'),
+                    "UserAgent": match.group('agent')
+                }
+                parsed_records.append(record)
+                
+    return parsed_records
 
-df = pd.DataFrame(records)
-df.to_csv("parsed_web_log.csv", index=False)
+def analyze_data(log_dataframe):
+    print("🧠 Analyzing the data to find patterns...")
+    
+    top_ips = log_dataframe["IP"].value_counts().head(10)
+    top_urls = log_dataframe["URL"].value_counts().head(10)
+    
+    all_user_agents = log_dataframe["UserAgent"].value_counts()
+    bot_keywords = ["bot", "curl", "nikto"]
+    detected_bots = all_user_agents[[ua for ua in all_user_agents.index if any(b in ua.lower() for b in bot_keywords)]]
 
-print(f"✅ Parsed {len(df)} log entries.")
-print("Data saved to parsed_web_log.csv")
+    requests_by_hour = log_dataframe.groupby(log_dataframe["Time"].dt.hour).size()
+    
+    analysis_results = {
+        "top_ips": top_ips,
+        "top_urls": top_urls,
+        "detected_bots": detected_bots,
+        "requests_by_hour": requests_by_hour
+    }
+    return analysis_results
 
+def create_visual_charts(analysis_results):
+    print("📊 Generating visual charts...")
+    
+    plt.figure(figsize=(10, 5))
+    analysis_results["top_ips"].plot(kind="bar")
+    plt.title("Top 10 Most Active Client IPs")
+    plt.ylabel("Number of Requests")
+    plt.xlabel("Client IP Address")
+    plt.tight_layout()
+    plt.savefig("top_ips.png")
+    plt.close()
 
-ip_counts = df["IP"].value_counts().head(10)
-url_counts = df["URL"].value_counts().head(10)
-bot_agents = df["UserAgent"].value_counts()
-bot_agents = bot_agents[[ua for ua in bot_agents.index if any(b in ua.lower() for b in ["bot", "curl", "nikto"])]]
+    plt.figure(figsize=(10, 5))
+    analysis_results["top_urls"].plot(kind="bar", color='orange')
+    plt.title("Top 10 Most Requested URLs")
+    plt.ylabel("Number of Hits")
+    plt.xlabel("URL Path")
+    plt.tight_layout()
+    plt.savefig("top_urls.png")
+    plt.close()
 
-# Requests over time
-requests_over_time = df.groupby(df["Time"].dt.hour).size()
+    plt.figure(figsize=(10, 5))
+    analysis_results["requests_by_hour"].plot(kind="line", marker="o")
+    plt.title("Website Requests per Hour of the Day")
+    plt.ylabel("Number of Requests")
+    plt.xlabel("Hour of Day (24-hour format)")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("requests_timeline.png")
+    plt.close()
+    
+    print("✅ Charts saved as top_ips.png, top_urls.png, and requests_timeline.png")
 
+def generate_pdf_report(analysis_results, total_entries):
+    print(f"📄 Creating PDF report: {OUTPUT_PDF_REPORT}")
+    
+    pdf_canvas = canvas.Canvas(OUTPUT_PDF_REPORT, pagesize=letter)
+    width, height = letter
 
-plt.figure(figsize=(10,5))
-ip_counts.plot(kind="bar")
-plt.title("Top Client IPs")
-plt.ylabel("Request Count")
-plt.xlabel("Client IP")
-plt.tight_layout()
-plt.savefig("top_ips.png")
-plt.close()
+    pdf_canvas.setFont("Helvetica-Bold", 16)
+    pdf_canvas.drawString(50, height - 50, "Web Server Log Analysis Report")
 
-plt.figure(figsize=(10,5))
-url_counts.plot(kind="bar", color='orange')
-plt.title("Top Requested URLs")
-plt.ylabel("Hit Count")
-plt.xlabel("URL")
-plt.tight_layout()
-plt.savefig("top_urls.png")
-plt.close()
+    pdf_canvas.setFont("Helvetica", 12)
+    pdf_canvas.drawString(50, height - 80, f"Total log entries analyzed: {total_entries}")
+    pdf_canvas.drawString(50, height - 100, f"Report generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    current_y = height - 140
 
-plt.figure(figsize=(10,5))
-requests_over_time.plot(kind="line", marker="o")
-plt.title("Requests per Hour")
-plt.ylabel("Request Count")
-plt.xlabel("Hour of Day")
-plt.grid(True)
-plt.tight_layout()
-plt.savefig("requests_timeline.png")
-plt.close()
+    pdf_canvas.setFont("Helvetica-Bold", 14)
+    pdf_canvas.drawString(50, current_y, "Top IPs:")
+    current_y -= 20
+    for ip, count in analysis_results["top_ips"].items():
+        pdf_canvas.setFont("Helvetica", 12)
+        pdf_canvas.drawString(60, current_y, f"{ip} — {count} requests")
+        current_y -= 15
+    
+    current_y -= 20
 
-print("📊 Charts saved (top_ips.png, top_urls.png, requests_timeline.png)")
+    pdf_canvas.setFont("Helvetica-Bold", 14)
+    pdf_canvas.drawString(50, current_y, "Top URLs:")
+    current_y -= 20
+    for url, count in analysis_results["top_urls"].items():
+        pdf_canvas.setFont("Helvetica", 12)
+        pdf_canvas.drawString(60, current_y, f"{url} — {count} hits")
+        current_y -= 15
 
-pdf_file = "WebServer_Log_Report.pdf"
-c = canvas.Canvas(pdf_file, pagesize=letter)
-width, height = letter
+    if not analysis_results["detected_bots"].empty:
+        current_y -= 20
+        pdf_canvas.setFont("Helvetica-Bold", 14)
+        pdf_canvas.drawString(50, current_y, "Detected Bots/Scanners:")
+        current_y -= 20
+        for agent, count in analysis_results["detected_bots"].items():
+            pdf_canvas.setFont("Helvetica", 10)
+            pdf_canvas.drawString(60, current_y, f"{agent[:70]}... — {count} hits")
+            current_y -= 15
 
-c.setFont("Helvetica-Bold", 16)
-c.drawString(50, height - 50, "Web Server Log Analysis Report")
+    pdf_canvas.showPage()
 
-c.setFont("Helvetica", 12)
-c.drawString(50, height - 80, f"Total log entries analyzed: {len(df)}")
-c.drawString(50, height - 100, f"Report generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    pdf_canvas.drawImage("top_ips.png", 50, height / 2, width=500, preserveAspectRatio=True)
+    pdf_canvas.drawImage("top_urls.png", 50, 50, width=500, preserveAspectRatio=True)
+    
+    pdf_canvas.showPage()
+    
+    pdf_canvas.drawImage("requests_timeline.png", 50, height / 2, width=500, preserveAspectRatio=True)
 
-c.setFont("Helvetica-Bold", 14)
-c.drawString(50, height - 140, "Top IPs:")
-y = height - 160
-for ip, count in ip_counts.items():
-    c.setFont("Helvetica", 12)
-    c.drawString(60, y, f"{ip} — {count} requests")
-    y -= 15
+    pdf_canvas.save()
+    print(f" PDF report generated successfully!")
 
-c.setFont("Helvetica-Bold", 14)
-c.drawString(50, y - 20, "Top URLs:")
-y -= 40
-for url, count in url_counts.items():
-    c.setFont("Helvetica", 12)
-    c.drawString(60, y, f"{url} — {count} hits")
-    y -= 15
+if __name__ == "__main__":
+    log_records = parse_log_file(LOG_FILE_PATH)
+    
+    if not log_records:
+        print("Could not find any valid log entries. Exiting.")
+    else:
+        print(f" Success! Parsed {len(log_records)} log entries.")
 
-if len(bot_agents) > 0:
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, y - 20, "Detected Bots/Scanners:")
-    y -= 40
-    for agent, count in bot_agents.items():
-        c.setFont("Helvetica", 12)
-        c.drawString(60, y, f"{agent} — {count} hits")
-        y -= 15
+        log_dataframe = pd.DataFrame(log_records)
+        log_dataframe.to_csv(OUTPUT_CSV_FILE, index=False)
+        print(f"Data saved to {OUTPUT_CSV_FILE}")
 
-c.showPage()
-c.drawImage("top_ips.png", 50, height/2 + 20, width=500, preserveAspectRatio=True)
-c.drawImage("top_urls.png", 50, height/4 - 100, width=500, preserveAspectRatio=True)
-
-c.showPage()
-c.drawImage("requests_timeline.png", 50, height/3, width=500, preserveAspectRatio=True)
-
-c.save()
-print(f"PDF report generated: {pdf_file}")
+        insights = analyze_data(log_dataframe)
+        create_visual_charts(insights)
+        generate_pdf_report(insights, total_entries=len(log_dataframe))
+        
+        print("\n All tasks complete!")
